@@ -67,7 +67,7 @@ func Download(url string) *Response {
 }
 
 func (option *RequestOption) Download() *Response {
-	result := &Response{nil, nil} // 生命返回变量
+	result := &Response{nil, nil}
 	client := &http.Client{
 		Transport: &http.Transport{
 			Dial: func(netw, addr string) (net.Conn, error) {
@@ -120,52 +120,6 @@ func (option *RequestOption) Download() *Response {
 	return &Response{resp, nil}
 }
 
-// 转码
-func (r *Response) Charconv(c string) *Response {
-	resp := r.Response
-	dec := mahonia.NewDecoder(c)
-	resp.Body = ioutil.NopCloser(dec.NewReader(resp.Body))
-	return r
-}
-
-// 获取url的host
-func gethost(url string) string {
-	a1 := strings.Split(url, "//")[1]
-	return strings.Split(a1, "/")[0]
-}
-
-func (response *Response) Json() (*simplejson.Json, error) {
-	defer response.Response.Body.Close()
-	return simplejson.NewFromReader(response.Response.Body)
-}
-
-/*
-	jsonp 转 json
-	正则提取出jsonp的json
-*/
-func (response *Response) Jsonp() (*simplejson.Json, error) {
-	defer response.Response.Body.Close()
-	body, _ := ioutil.ReadAll(response.Response.Body)
-
-	reg := regexp.MustCompile(`^[^\[{]*([\[{][\s\S]*?[\]}])[^\]}]*$`) // 提取json正则表达式
-	match := reg.FindSubmatch(body)                                   // 提取json
-	if len(match) < 2 {
-		return nil, errors.New("jsonp提取json失败，正则无法匹配")
-	}
-
-	return simplejson.NewJson(match[1])
-}
-
-func (response *Response) Html() (*goquery.Document, error) {
-	if response.Error != nil {
-		return nil, response.Error
-	}
-	if response.Response == nil {
-		return nil, errors.New("response is nil")
-	}
-	return goquery.NewDocumentFromResponse(response.Response)
-}
-
 func Request(url string, method string) *RequestOption {
 	// 默认设置
 	return &RequestOption{
@@ -184,6 +138,50 @@ func Get(url string) *RequestOption {
 
 func Post(url string) *RequestOption {
 	return Request(url, "POST")
+}
+
+// 转码
+func (r *Response) Charconv(c string) *Response {
+	resp := r.Response
+	dec := mahonia.NewDecoder(c)
+	resp.Body = ioutil.NopCloser(dec.NewReader(resp.Body))
+	return r
+}
+
+// match url host
+func gethost(url string) string {
+	a1 := strings.Split(url, "//")[1]
+	return strings.Split(a1, "/")[0]
+}
+
+func (response *Response) Json() (*simplejson.Json, error) {
+	defer response.Response.Body.Close()
+	return simplejson.NewFromReader(response.Response.Body)
+}
+
+// jsonp to json
+func (response *Response) Jsonp() (*simplejson.Json, error) {
+	defer response.Response.Body.Close()
+	body, _ := ioutil.ReadAll(response.Response.Body)
+
+	// match json
+	reg := regexp.MustCompile(`^[^\[{]*([\[{][\s\S]*?[\]}])[^\]}]*$`)
+	match := reg.FindSubmatch(body)
+	if len(match) < 2 {
+		return nil, errors.New("jsonp to json error")
+	}
+
+	return simplejson.NewJson(match[1])
+}
+
+func (response *Response) Html() (*goquery.Document, error) {
+	if response.Error != nil {
+		return nil, response.Error
+	}
+	if response.Response == nil {
+		return nil, errors.New("response is nil")
+	}
+	return goquery.NewDocumentFromResponse(response.Response)
 }
 
 func (req *RequestOption) Retry(n int) *RequestOption {
