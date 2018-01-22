@@ -134,6 +134,11 @@ func gethost(url string) string {
 	return strings.Split(a1, "/")[0]
 }
 
+func (response *Response) Bytes() ([]byte, error) {
+	defer response.Response.Body.Close()
+	return ioutil.ReadAll(response.Response.Body)
+}
+
 func (response *Response) Json() (*simplejson.Json, error) {
 	defer response.Response.Body.Close()
 	return simplejson.NewFromReader(response.Response.Body)

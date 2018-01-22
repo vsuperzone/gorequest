@@ -6,5 +6,6 @@ import (
 )
 
 func Test_get(t *testing.T) {
-	fmt.Println(Get("http://baidu.com"))
+	bytes, _ := Get("http://wl.localhost/api/yunwangke/partner/all").Download().Bytes()
+	fmt.Println(bytes)
 }
