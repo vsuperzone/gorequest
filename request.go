@@ -1,4 +1,4 @@
-package crawler
+package gorequest
 
 import (
 	"fmt"
