@@ -54,7 +54,7 @@ func Post(url string) *RequestOption {
 	return Request(url, "POST")
 }
 
-func (option *RequestOption) Download() *Response {
+func (option *RequestOption) Open() *Response {
 	result := &Response{nil, nil} // 生命返回变量
 	client := &http.Client{
 		Transport: &http.Transport{
