@@ -12,20 +12,21 @@ import (
 	"github.com/axgle/mahonia"
 	"github.com/bitly/go-simplejson"
 	// "io"
+	"encoding/json"
 	"net/url"
 	"regexp"
 	"strings"
 )
 
 type RequestOption struct {
-	Method      string
+	Method      string // post or get...
 	Url         string
 	Head        http.Header
-	ConnTimeout time.Duration
-	Timeout     time.Duration
-	DelayTime   time.Duration
+	ConnTimeout time.Duration // 连接超时时间
+	Timeout     time.Duration // 传输超时时间
+	DelayTime   time.Duration // 重试间隔时间
 	Data        url.Values
-	Retrytimes  int
+	Retrytimes  int // 重试次数
 }
 
 type Response struct {
@@ -33,37 +34,24 @@ type Response struct {
 	Error    error
 }
 
-// simple downloader
-func Download(url string) *Response {
-	client := &http.Client{}
-
-	req, _ := http.NewRequest("GET", url, nil) // 发起请求
-
-	host := gethost(url) // get host
-
-	req.Header.Add("Host", host)
-	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/62.0.3202.94 Safari/537.36")
-
-	// 请求失败重新请求
-	var reqerr error
-	var resp *http.Response
-	retry := 3 // 重新请求次数
-	for i := 0; i < retry; i++ {
-		resp, reqerr = client.Do(req)
-		if reqerr != nil {
-			continue
-		}
+func Request(url string, method string) *RequestOption {
+	// 默认设置
+	return &RequestOption{
+		Url:         url,
+		Method:      method,
+		ConnTimeout: 10,
+		Timeout:     15,
+		Retrytimes:  3,
+		DelayTime:   3,
 	}
-	if reqerr != nil {
-		fmt.Println("网页打开失败")
-		panic(reqerr)
-	}
+}
 
-	response := Response{
-		Response: resp,
-	}
+func Get(url string) *RequestOption {
+	return Request(url, "GET")
+}
 
-	return &response
+func Post(url string) *RequestOption {
+	return Request(url, "POST")
 }
 
 func (option *RequestOption) Download() *Response {
@@ -120,6 +108,12 @@ func (option *RequestOption) Download() *Response {
 	return &Response{resp, nil}
 }
 
+func (req *RequestOption) Retry(n int, t time.Duration) *RequestOption {
+	req.Retrytimes = n
+	req.DelayTime = t
+	return req
+}
+
 // 转码
 func (r *Response) Charconv(c string) *Response {
 	resp := r.Response
@@ -128,20 +122,19 @@ func (r *Response) Charconv(c string) *Response {
 	return r
 }
 
-// 获取url的host
-func gethost(url string) string {
-	a1 := strings.Split(url, "//")[1]
-	return strings.Split(a1, "/")[0]
-}
-
 func (response *Response) Bytes() ([]byte, error) {
 	defer response.Response.Body.Close()
 	return ioutil.ReadAll(response.Response.Body)
 }
 
-func (response *Response) Json() (*simplejson.Json, error) {
+func (response *Response) Json(t interface{}) error {
 	defer response.Response.Body.Close()
-	return simplejson.NewFromReader(response.Response.Body)
+	data, err := ioutil.ReadAll(response.Response.Body)
+	if err != nil {
+		return err
+	}
+	json.Unmarshal(data, t)
+	return nil
 }
 
 /*
@@ -169,34 +162,4 @@ func (response *Response) Html() (*goquery.Document, error) {
 		return nil, errors.New("response is nil")
 	}
 	return goquery.NewDocumentFromResponse(response.Response)
-}
-
-func Request(url string, method string) *RequestOption {
-	// 默认设置
-	return &RequestOption{
-		Url:         url,
-		Method:      method,
-		ConnTimeout: 10,
-		Timeout:     15,
-		Retrytimes:  3,
-		DelayTime:   3,
-	}
-}
-
-func Get(url string) *RequestOption {
-	return Request(url, "GET")
-}
-
-func Post(url string) *RequestOption {
-	return Request(url, "POST")
-}
-
-func (req *RequestOption) Retry(n int) *RequestOption {
-	req.Retrytimes = n
-	return req
-}
-
-func (req *RequestOption) Delay(time time.Duration) *RequestOption {
-	req.DelayTime = time
-	return req
 }
