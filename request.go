@@ -1,123 +1,34 @@
 package gorequest
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"github.com/PuerkitoBio/goquery"
+	"github.com/axgle/mahonia"
+	// "io"
 	"io/ioutil"
 	"net"
 	"net/http"
-	"time"
-	// "bytes"
-	"errors"
-	"github.com/PuerkitoBio/goquery"
-	"github.com/axgle/mahonia"
-	"github.com/bitly/go-simplejson"
-	// "io"
-	"net/url"
-	"regexp"
 	"strings"
+	"time"
 )
 
 type RequestOption struct {
-	Method      string
-	Url         string
-	Head        http.Header
-	ConnTimeout time.Duration
-	Timeout     time.Duration
-	DelayTime   time.Duration
-	Data        url.Values
-	Retrytimes  int
+	Method       string
+	Url          string
+	Head         http.Header
+	ConnTimeout  time.Duration
+	Timeout      time.Duration
+	DelayTime    time.Duration
+	JsonFormData *bytes.Reader
+	Retrytimes   int
+	FormDataType string
 }
 
 type Response struct {
 	Response *http.Response
 	Error    error
-}
-
-// simple downloader
-func Open(url string) *Response {
-	client := &http.Client{}
-
-	req, _ := http.NewRequest("GET", url, nil) // 发起请求
-
-	host := gethost(url) // get host
-
-	req.Header.Add("Host", host)
-	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/62.0.3202.94 Safari/537.36")
-
-	// 请求失败重新请求
-	var reqerr error
-	var resp *http.Response
-	retry := 3 // 重新请求次数
-	for i := 0; i < retry; i++ {
-		resp, reqerr = client.Do(req)
-		if reqerr != nil {
-			continue
-		}
-	}
-	if reqerr != nil {
-		fmt.Println("网页打开失败")
-		panic(reqerr)
-	}
-
-	response := Response{
-		Response: resp,
-	}
-
-	return &response
-}
-
-func (option *RequestOption) Open() *Response {
-	result := &Response{nil, nil}
-	client := &http.Client{
-		Transport: &http.Transport{
-			Dial: func(netw, addr string) (net.Conn, error) {
-				c, err := net.DialTimeout(netw, addr, time.Second*option.ConnTimeout) // 设置建立连接超时
-				if err != nil {
-					return nil, err
-				}
-				c.SetDeadline(time.Now().Add(option.Timeout * time.Second)) // 设置发送接收数据超时
-				return c, nil
-			},
-		},
-	}
-
-	// form
-	formio := option.Data.Encode()
-	form := strings.NewReader(formio)
-
-	req, err := http.NewRequest(option.Method, option.Url, form) // 发起请求
-	if err != nil {
-		result.Error = err
-		return result
-	}
-
-	// header
-	// req.Header = req.Head
-	req.Header.Set("Connection", "close")
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-
-	// 请求失败重新请求
-	var reqerr error
-	var resp *http.Response
-	for i := 0; i < option.Retrytimes; i++ {
-		resp, reqerr = client.Do(req)
-		if reqerr != nil {
-			fmt.Printf("请求失败重试：%d\r\n", i+1)
-			if option.DelayTime > 0 {
-				time.Sleep(option.DelayTime * time.Second)
-			}
-			continue
-		} else {
-			break
-		}
-	}
-
-	if reqerr != nil {
-		fmt.Print("网页打开失败\n")
-		panic(reqerr)
-	}
-
-	return &Response{resp, nil}
 }
 
 func Request(url string, method string) *RequestOption {
@@ -140,9 +51,90 @@ func Post(url string) *RequestOption {
 	return Request(url, "POST")
 }
 
+func (option *RequestOption) JsonForm(data *map[string]interface{}) *RequestOption {
+	option.FormDataType = "json"
+	bytesData, err := json.Marshal(data)
+	if err != nil {
+		fmt.Println(err.Error())
+		return option
+	}
+	option.JsonFormData = bytes.NewReader(bytesData)
+	return option
+}
+
+func (option *RequestOption) Open() *Response {
+	result := &Response{nil, nil}
+	client := &http.Client{
+		Transport: &http.Transport{
+			Dial: func(netw, addr string) (net.Conn, error) {
+				c, err := net.DialTimeout(netw, addr, time.Second*option.ConnTimeout) // 设置建立连接超时
+				if err != nil {
+					return nil, err
+				}
+				c.SetDeadline(time.Now().Add(option.Timeout * time.Second)) // 设置发送接收数据超时
+				return c, nil
+			},
+		},
+	}
+
+	var req *http.Request
+	if option.FormDataType == "json" {
+		var err error
+		req, err = http.NewRequest(option.Method, option.Url, option.JsonFormData) // 发起请求
+		if err != nil {
+			result.Error = err
+			return result
+		}
+	}
+
+	// headers
+	req.Header.Set("Connection", "close")
+	if option.FormDataType == "json" {
+		req.Header.Set("Content-Type", "application/json;charset=UTF-8")
+	} else {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+
+	// 请求失败重新请求
+	var reqerr error
+	var resp *http.Response
+	for i := 0; i < option.Retrytimes; i++ {
+		resp, reqerr = client.Do(req)
+		if reqerr != nil {
+			fmt.Printf("try again open：%s\r\n", option.Url)
+			if option.DelayTime > 0 {
+				time.Sleep(option.DelayTime * time.Second)
+			}
+			continue
+		} else {
+			break
+		}
+	}
+
+	if reqerr != nil {
+		fmt.Print("Open page fail\n")
+		return &Response{resp, nil}
+	}
+
+	return &Response{resp, nil}
+}
+
+func (req *RequestOption) Retry(n int) *RequestOption {
+	req.Retrytimes = n
+	return req
+}
+
+func (req *RequestOption) Delay(time time.Duration) *RequestOption {
+	req.DelayTime = time
+	return req
+}
+
 // 转码
 func (r *Response) Charconv(c string) *Response {
 	resp := r.Response
+	if r.Error != nil {
+		return r
+	}
 	dec := mahonia.NewDecoder(c)
 	resp.Body = ioutil.NopCloser(dec.NewReader(resp.Body))
 	return r
@@ -154,42 +146,42 @@ func gethost(url string) string {
 	return strings.Split(a1, "/")[0]
 }
 
-func (response *Response) Json() (*simplejson.Json, error) {
-	defer response.Response.Body.Close()
-	return simplejson.NewFromReader(response.Response.Body)
+func (response *Response) Request() (*http.Response, error) {
+	return response.Response, response.Error
+}
+
+func (response *Response) Json(t interface{}) error {
+	resp := response.Response
+	if response.Error != nil {
+		return response.Error
+	}
+	defer resp.Body.Close()
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(data, t)
+	return err
 }
 
 // jsonp to json
-func (response *Response) Jsonp() (*simplejson.Json, error) {
-	defer response.Response.Body.Close()
-	body, _ := ioutil.ReadAll(response.Response.Body)
+// func (response *Response) Jsonp() (*simplejson.Json, error) {
+// 	defer response.Response.Body.Close()
+// 	body, _ := ioutil.ReadAll(response.Response.Body)
 
-	// match json
-	reg := regexp.MustCompile(`^[^\[{]*([\[{][\s\S]*?[\]}])[^\]}]*$`)
-	match := reg.FindSubmatch(body)
-	if len(match) < 2 {
-		return nil, errors.New("jsonp to json error")
-	}
+// 	// match json
+// 	reg := regexp.MustCompile(`^[^\[{]*([\[{][\s\S]*?[\]}])[^\]}]*$`)
+// 	match := reg.FindSubmatch(body)
+// 	if len(match) < 2 {
+// 		return nil, errors.New("jsonp to json error")
+// 	}
 
-	return simplejson.NewJson(match[1])
-}
+// 	return simplejson.NewJson(match[1])
+// }
 
 func (response *Response) Html() (*goquery.Document, error) {
 	if response.Error != nil {
 		return nil, response.Error
 	}
-	if response.Response == nil {
-		return nil, errors.New("response is nil")
-	}
 	return goquery.NewDocumentFromResponse(response.Response)
-}
-
-func (req *RequestOption) Retry(n int) *RequestOption {
-	req.Retrytimes = n
-	return req
-}
-
-func (req *RequestOption) Delay(time time.Duration) *RequestOption {
-	req.DelayTime = time
-	return req
 }
