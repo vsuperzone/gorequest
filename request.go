@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -17,13 +18,15 @@ import (
 type RequestOption struct {
 	Method       string
 	Url          string
-	Head         http.Header
-	ConnTimeout  time.Duration
-	Timeout      time.Duration
-	DelayTime    time.Duration
-	JsonFormData *bytes.Reader
-	Retrytimes   int
-	FormDataType string
+	Header       http.Header
+	ConnTimeout  time.Duration     // 链接超时时间
+	Timeout      time.Duration     // 传输超时时间
+	Retrytimes   int               // 重试次数
+	DelayTime    time.Duration     // 重试间隔时间
+	ParamsData   map[string]string // GET参数
+	FormData     url.Values        // post data
+	JsonFormData *bytes.Reader     // json post data
+	JsonContent  bool              // Content-Type是否为json
 }
 
 type Response struct {
@@ -32,7 +35,7 @@ type Response struct {
 }
 
 func Request(url string, method string) *RequestOption {
-	// 默认设置
+	// 默认参数
 	return &RequestOption{
 		Url:         url,
 		Method:      method,
@@ -51,8 +54,21 @@ func Post(url string) *RequestOption {
 	return Request(url, "POST")
 }
 
+// get参数
+func (option *RequestOption) Params(params map[string]string) *RequestOption {
+	option.ParamsData = params
+	return option
+}
+
+// post form data
+func (option *RequestOption) Form(data url.Values) *RequestOption {
+	option.FormData = data
+	return option
+}
+
+// json post form data
 func (option *RequestOption) JsonForm(data *map[string]interface{}) *RequestOption {
-	option.FormDataType = "json"
+	option.JsonContent = true
 	bytesData, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println(err.Error())
@@ -62,8 +78,10 @@ func (option *RequestOption) JsonForm(data *map[string]interface{}) *RequestOpti
 	return option
 }
 
+// 请求
 func (option *RequestOption) Open() *Response {
 	result := &Response{nil, nil}
+
 	client := &http.Client{
 		Transport: &http.Transport{
 			Dial: func(netw, addr string) (net.Conn, error) {
@@ -77,26 +95,33 @@ func (option *RequestOption) Open() *Response {
 		},
 	}
 
+	// request
 	var req *http.Request
-	if option.FormDataType == "json" {
-		var err error
-		req, err = http.NewRequest(option.Method, option.Url, option.JsonFormData) // 发起请求
-		if err != nil {
-			result.Error = err
-			return result
-		}
+	var reqerr error
+	if option.JsonContent {
+		req, reqerr = http.NewRequest(option.Method, option.Url, option.JsonFormData) // Content-Type 为json时
+	} else {
+		req, reqerr = http.NewRequest(option.Method, option.Url, option.FormData)
+	}
+	if reqerr != nil {
+		result.Error = reqerr
+		return result
 	}
 
-	// headers
-	req.Header.Set("Connection", "close")
-	if option.FormDataType == "json" {
+	// get 参数
+	q := req.URL.Query()
+	for k, v := range option.ParamsData {
+		q.Add(k, v)
+	}
+
+	// 默认headers
+	if option.JsonContent {
 		req.Header.Set("Content-Type", "application/json;charset=UTF-8")
 	} else {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 
 	// 请求失败重新请求
-	var reqerr error
 	var resp *http.Response
 	for i := 0; i < option.Retrytimes; i++ {
 		resp, reqerr = client.Do(req)
@@ -146,7 +171,7 @@ func gethost(url string) string {
 	return strings.Split(a1, "/")[0]
 }
 
-func (response *Response) Request() (*http.Response, error) {
+func (response *Response) Native() (*http.Response, error) {
 	return response.Response, response.Error
 }
 
